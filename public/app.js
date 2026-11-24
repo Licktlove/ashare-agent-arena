@@ -16,6 +16,12 @@ async function refresh() {
   const selected = select.value;
   select.innerHTML = state.agents.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
   if (state.agents.some(a => a.id === selected)) select.value = selected;
+  const harnessSelect = $('#harness select[name=agentId]');
+  const harnessSelected = harnessSelect.value;
+  harnessSelect.innerHTML = select.innerHTML;
+  if (state.agents.some(a => a.id === harnessSelected)) harnessSelect.value = harnessSelected;
+  $('#feed-status').textContent = '行情源状态：' + state.feed.status + (state.feed.error ? ' · ' + state.feed.error : '');
+  $('#calls').innerHTML = state.harness.calls.map(c => `<p>${escapeHtml(c.model)} · ${escapeHtml(c.status)} · ${escapeHtml(c.created_at)} · ${c.actual_cost == null ? '待对账' : '¥' + (c.actual_cost/1000000).toFixed(6)}<br><small>调用 ID ${escapeHtml(c.id)}</small></p>`).join('') || '<p class="empty">暂无调用</p>';
   $('#orders').innerHTML = state.orders.length ? `<h3>委托</h3><div class="table"><table><thead><tr><th>账户</th><th>股票</th><th>方向</th><th>限价</th><th>剩余 / 总数</th><th>状态</th><th></th></tr></thead><tbody>${state.orders.map(o => `<tr><td>${escapeHtml(names.get(o.agent_id))}</td><td>${escapeHtml(o.symbol)}</td><td>${o.side === 'buy' ? '买入' : '卖出'}</td><td>${money(o.limit_price)}</td><td>${o.remaining} / ${o.quantity}</td><td>${escapeHtml(o.status)}</td><td>${o.status === 'open' ? `<button data-cancel="${o.id}">撤单</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">暂无委托</p>';
   $('#positions').innerHTML = state.positions.length ? `<h3>持仓</h3><div class="table"><table><thead><tr><th>账户</th><th>股票</th><th>持有</th><th>可卖</th><th>冻结</th></tr></thead><tbody>${state.positions.map(p => `<tr><td>${escapeHtml(names.get(p.agent_id))}</td><td>${escapeHtml(p.symbol)}</td><td>${p.quantity}</td><td>${p.sellable}</td><td>${p.frozen}</td></tr>`).join('')}</tbody></table></div>` : '';
   $('#events').innerHTML = state.events.map(e => `<div class="event"><time>${escapeHtml(new Date(e.created_at).toLocaleString('zh-CN'))}</time><strong>${escapeHtml(names.get(e.agent_id) || '系统')} · ${escapeHtml(e.type)}</strong><span>${escapeHtml(JSON.stringify(e.payload))}</span></div>`).join('') || '<p class="empty">暂无日志</p>';
@@ -25,6 +31,13 @@ async function run(action) { try { await action(); $('#message').textContent = '
 $('#agent').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/agents', {...x, cash: Math.round(Number(x.cash)*100), seed: Number(x.seed)})); };
 $('#order').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/orders', {...x, quantity: Number(x.quantity), limitPrice: Math.round(Number(x.limitPrice)*100)})); };
 $('#quote').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/quotes', {...x, bid: Math.round(Number(x.bid)*100), ask: Math.round(Number(x.ask)*100), bidQuantity: Number(x.bidQuantity), askQuantity: Number(x.askQuantity), observedAt: new Date().toISOString(), source: 'manual'})); };
+$('#harness').onsubmit = event => {
+  event.preventDefault();
+  const x = formValues(event.target);
+  run(() => request('/api/harness/configure', {...x, inputRate: Math.round(Number(x.inputRate)*1000000), outputRate: Math.round(Number(x.outputRate)*1000000), budget: Math.round(Number(x.budget)*1000000), outputLimit: Number(x.outputLimit), intervalSeconds: Number(x.intervalSeconds), enabled: Boolean(x.enabled)}));
+};
+$('#decide').onclick = () => run(() => request('/api/harness/decide', {agentId: $('#harness select[name=agentId]').value}));
+$('#reconcile').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/harness/reconcile', {callId: x.callId, actualCost: Math.round(Number(x.cost)*1000000)})); };
 $('#orders').onclick = event => { const id = event.target.dataset.cancel; if (id) run(() => request('/api/cancel', {id})); };
 $('#refresh').onclick = () => run(refresh);
 refresh().catch(e => { $('#message').textContent = e.message; });

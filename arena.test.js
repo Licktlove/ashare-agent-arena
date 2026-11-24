@@ -27,3 +27,15 @@ test('rejects stale quotes and insufficient cash', () => {
   assert.throws(() => arena.quote({symbol:'SH600000',bid:990,ask:1000,bidQuantity:1,askQuantity:1,observedAt:'2000-01-01T00:00:00Z'}), /过期/);
   assert.equal(arena.snapshot().orders.length,0);
 });
+
+test('repeated identical depth cannot be consumed twice', async () => {
+  const arena = createArena();
+  const id = arena.createAgent({name:'松',cash:1000000});
+  arena.submit({agentId:id,symbol:'SH600000',side:'buy',quantity:100,limitPrice:1000});
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const quote = () => arena.quote({symbol:'SH600000',bid:990,ask:995,bidQuantity:100,askQuantity:40,observedAt:new Date().toISOString()});
+  quote();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  quote();
+  assert.equal(arena.snapshot().orders[0].remaining,60);
+});

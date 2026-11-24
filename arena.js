@@ -32,6 +32,11 @@ export function createArena(path = ':memory:') {
       ask INTEGER NOT NULL, bid_quantity INTEGER NOT NULL, ask_quantity INTEGER NOT NULL,
       source TEXT NOT NULL, observed_at TEXT NOT NULL, received_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS depth_usage (
+      agent_id TEXT NOT NULL, symbol TEXT NOT NULL, side TEXT NOT NULL,
+      price INTEGER NOT NULL, visible INTEGER NOT NULL, available INTEGER NOT NULL,
+      PRIMARY KEY(agent_id, symbol, side)
+    );
   `);
   const now = () => new Date().toISOString();
   const event = (agent, type, payload) => db.prepare(
@@ -104,17 +109,23 @@ export function createArena(path = ':memory:') {
     return transaction(() => {
       db.prepare('INSERT INTO quotes(symbol,bid,ask,bid_quantity,ask_quantity,source,observed_at,received_at) VALUES(?,?,?,?,?,?,?,?)')
         .run(input.symbol,bid,ask,bidQuantity,askQuantity,String(input.source || 'manual'),new Date(observed).toISOString(),new Date(received).toISOString());
-      const orders = db.prepare("SELECT * FROM orders WHERE symbol=? AND status='open' ORDER BY created_at,id").all(input.symbol);
+      const orders = db.prepare("SELECT * FROM orders WHERE symbol=? AND status='open' ORDER BY CASE side WHEN 'buy' THEN -limit_price ELSE limit_price END, created_at,id").all(input.symbol);
       const available = new Map();
       for (const order of orders) {
         if (observed <= Date.parse(order.created_at)) continue;
         const price = order.side === 'buy' ? ask : bid;
         if (order.side === 'buy' ? price > order.limit_price : price < order.limit_price) continue;
         const key = order.agent_id + ':' + order.side;
-        const depth = available.has(key) ? available.get(key) : (order.side === 'buy' ? askQuantity : bidQuantity);
+        const visible = order.side === 'buy' ? askQuantity : bidQuantity;
+        const previous = db.prepare('SELECT * FROM depth_usage WHERE agent_id=? AND symbol=? AND side=?').get(order.agent_id, order.symbol, order.side);
+        const depth = available.has(key) ? available.get(key) : previous && previous.price === price
+          ? Math.min(visible, previous.available + Math.max(0, visible - previous.visible)) : visible;
         const filled = Math.min(order.remaining, depth);
-        if (!filled) continue;
         available.set(key, depth - filled);
+        db.prepare(`INSERT INTO depth_usage(agent_id,symbol,side,price,visible,available) VALUES(?,?,?,?,?,?)
+          ON CONFLICT(agent_id,symbol,side) DO UPDATE SET price=excluded.price,visible=excluded.visible,available=excluded.available`)
+          .run(order.agent_id,order.symbol,order.side,price,visible,depth-filled);
+        if (!filled) continue;
         const remaining = order.remaining - filled;
         let reserved = order.reserved;
         if (order.side === 'buy') {
