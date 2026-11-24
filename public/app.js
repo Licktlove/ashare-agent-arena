@@ -10,6 +10,11 @@ async function request(path, body) {
 }
 async function refresh() {
   state = await request('/api/state');
+  const feedLabels = { connected: '行情更新中', connecting: '正在连接', stale: '无可用于成交的新鲜盘口', degraded: '连接异常', unconfigured: '未配置' };
+  $('#market-health').textContent = `${state.feed.provider || '行情源'} · ${feedLabels[state.feed.status] || state.feed.status}`;
+  const watchInput = $('#watchlist input[name=symbols]');
+  if (document.activeElement !== watchInput) watchInput.value = (state.feed.watchlist || []).join(', ');
+  $('#market-quotes').innerHTML = state.feed.quotes?.length ? `<div class="table"><table><thead><tr><th>股票</th><th>最新价</th><th>买一</th><th>卖一</th><th>行情时间（北京时间）</th></tr></thead><tbody>${state.feed.quotes.map(q => `<tr><td>${escapeHtml(q.name || '')} ${escapeHtml(q.symbol)}</td><td>${q.last ? money(q.last) : '—'}</td><td>${q.bid ? money(q.bid) : '—'}</td><td>${q.ask ? money(q.ask) : '—'}</td><td>${q.observedAt ? escapeHtml(new Date(q.observedAt).toLocaleString('zh-CN', {timeZone:'Asia/Shanghai'})) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">暂无行情，请检查连接。</p>';
   const names = new Map(state.agents.map(a => [a.id, a.name]));
   $('#accounts').innerHTML = state.agents.map(a => `<article><div class="card-head"><strong>${escapeHtml(a.name)}</strong><span>种子 ${a.seed}</span></div><p class="amount">${money(a.cash)}</p><small>现金余额 · 冻结 ${money(a.frozen_cash)}</small><p>模型 ${escapeHtml(a.model || '待配置')}</p></article>`).join('') || '<p class="empty">还没有账户，创建第一个 Agent。</p>';
   const select = $('#order select[name=agentId]');
@@ -38,7 +43,9 @@ $('#harness').onsubmit = event => {
 };
 $('#decide').onclick = () => run(() => request('/api/harness/decide', {agentId: $('#harness select[name=agentId]').value}));
 $('#reconcile').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/harness/reconcile', {callId: x.callId, actualCost: Math.round(Number(x.cost)*1000000)})); };
+$('#watchlist').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/watchlist', {symbols:x.symbols.split(/[\s,，]+/)})); };
 $('#settle').onsubmit = event => { event.preventDefault(); run(() => request('/api/settle', formValues(event.target))); };
 $('#orders').onclick = event => { const id = event.target.dataset.cancel; if (id) run(() => request('/api/cancel', {id})); };
 $('#refresh').onclick = () => run(refresh);
 refresh().catch(e => { $('#message').textContent = e.message; });
+setInterval(() => refresh().catch(() => {}), 10000);
