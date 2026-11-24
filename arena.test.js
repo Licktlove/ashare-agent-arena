@@ -39,3 +39,15 @@ test('repeated identical depth cannot be consumed twice', async () => {
   quote();
   assert.equal(arena.snapshot().orders[0].remaining,60);
 });
+
+test('settlement unlocks earlier lots once and leaves same-day purchases locked', () => {
+  const arena = createArena();
+  const id = arena.createAgent({name:'松',cash:1000000});
+  arena.db.prepare('INSERT INTO positions(agent_id,symbol,quantity,sellable,frozen) VALUES(?,?,?,?,?)').run(id,'SH600000',200,0,0);
+  arena.db.prepare('INSERT INTO buy_lots(agent_id,symbol,quantity,trade_day) VALUES(?,?,?,?)').run(id,'SH600000',100,'2020-01-02');
+  arena.db.prepare('INSERT INTO buy_lots(agent_id,symbol,quantity,trade_day) VALUES(?,?,?,?)').run(id,'SH600000',100,'2020-01-03');
+  assert.equal(arena.settle('2020-01-03'),1);
+  assert.equal(arena.settle('2020-01-03'),0);
+  assert.equal(arena.snapshot().positions[0].sellable,100);
+  assert.throws(()=>arena.settle('2099-01-01'),/日期无效/);
+});

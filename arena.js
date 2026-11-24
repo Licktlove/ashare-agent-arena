@@ -37,6 +37,11 @@ export function createArena(path = ':memory:') {
       price INTEGER NOT NULL, visible INTEGER NOT NULL, available INTEGER NOT NULL,
       PRIMARY KEY(agent_id, symbol, side)
     );
+    CREATE TABLE IF NOT EXISTS buy_lots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL REFERENCES agents(id),
+      symbol TEXT NOT NULL, quantity INTEGER NOT NULL, trade_day TEXT NOT NULL,
+      settled INTEGER NOT NULL DEFAULT 0
+    );
   `);
   const now = () => new Date().toISOString();
   const event = (agent, type, payload) => db.prepare(
@@ -52,6 +57,7 @@ export function createArena(path = ':memory:') {
     return value;
   };
   const symbolOk = symbol => typeof symbol === 'string' && /^(SH|SZ|BJ)\d{6}$/.test(symbol);
+  const chinaDay = time => new Date(time + 8 * 3600000).toISOString().slice(0, 10);
   function createAgent(input) {
     if (typeof input.name !== 'string' || !input.name.trim()) throw new Error('请输入名称');
     const cash = integer(input.cash, '初始资金', 1);
@@ -134,6 +140,8 @@ export function createArena(path = ':memory:') {
           db.prepare('UPDATE agents SET cash=cash-?,frozen_cash=frozen_cash-? WHERE id=?').run(filled * price, release, order.agent_id);
           db.prepare(`INSERT INTO positions(agent_id,symbol,quantity,sellable,frozen) VALUES(?,?,?,0,0)
             ON CONFLICT(agent_id,symbol) DO UPDATE SET quantity=quantity+excluded.quantity`).run(order.agent_id, order.symbol, filled);
+          db.prepare('INSERT INTO buy_lots(agent_id,symbol,quantity,trade_day) VALUES(?,?,?,?)')
+            .run(order.agent_id, order.symbol, filled, chinaDay(observed));
         } else {
           db.prepare('UPDATE positions SET quantity=quantity-?,sellable=sellable-?,frozen=frozen-? WHERE agent_id=? AND symbol=?').run(filled, filled, filled, order.agent_id, order.symbol);
           db.prepare('UPDATE agents SET cash=cash+? WHERE id=?').run(filled * price, order.agent_id);
@@ -141,6 +149,18 @@ export function createArena(path = ':memory:') {
         db.prepare('UPDATE orders SET remaining=?,reserved=?,status=? WHERE id=?').run(remaining,reserved,remaining ? 'open' : 'filled',order.id);
         event(order.agent_id, 'order.filled', { id: order.id, quantity: filled, price, remaining, observedAt: input.observedAt, source: input.source || 'manual' });
       }
+    });
+  }
+  function settle(day) {
+    if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day+'T00:00:00Z')) || new Date(day+'T00:00:00Z').toISOString().slice(0,10) !== day || day > chinaDay(Date.now())) throw new Error('结算日期无效');
+    return transaction(() => {
+      const lots = db.prepare('SELECT * FROM buy_lots WHERE settled=0 AND trade_day<? ORDER BY id').all(day);
+      for (const lot of lots) {
+        db.prepare('UPDATE positions SET sellable=sellable+? WHERE agent_id=? AND symbol=?').run(lot.quantity,lot.agent_id,lot.symbol);
+        db.prepare('UPDATE buy_lots SET settled=1 WHERE id=?').run(lot.id);
+        event(lot.agent_id, 'position.settled', {symbol:lot.symbol, quantity:lot.quantity, tradeDay:lot.trade_day, settlementDay:day});
+      }
+      return lots.length;
     });
   }
   function snapshot() {
@@ -152,5 +172,5 @@ export function createArena(path = ':memory:') {
       quotes: db.prepare('SELECT * FROM quotes ORDER BY id DESC LIMIT 100').all()
     };
   }
-  return { db, createAgent, submit, cancel, quote, snapshot };
+  return { db, createAgent, submit, cancel, quote, settle, snapshot };
 }

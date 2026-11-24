@@ -38,6 +38,7 @@ $('#harness').onsubmit = event => {
 };
 $('#decide').onclick = () => run(() => request('/api/harness/decide', {agentId: $('#harness select[name=agentId]').value}));
 $('#reconcile').onsubmit = event => { event.preventDefault(); const x = formValues(event.target); run(() => request('/api/harness/reconcile', {callId: x.callId, actualCost: Math.round(Number(x.cost)*1000000)})); };
+$('#settle').onsubmit = event => { event.preventDefault(); run(() => request('/api/settle', formValues(event.target))); };
 $('#orders').onclick = event => { const id = event.target.dataset.cancel; if (id) run(() => request('/api/cancel', {id})); };
 $('#refresh').onclick = () => run(refresh);
 refresh().catch(e => { $('#message').textContent = e.message; });

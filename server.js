@@ -68,6 +68,7 @@ http.createServer(async (req, res) => {
     if (url.pathname === '/api/agents') result = arena.createAgent(input);
     else if (url.pathname === '/api/orders') result = arena.submit(input);
     else if (url.pathname === '/api/cancel') result = arena.cancel(input.id);
+    else if (url.pathname === '/api/settle') result = arena.settle(input.day);
     else if (url.pathname === '/api/quotes') result = arena.quote({ ...input, source: 'manual' });
     else if (url.pathname === '/api/harness/configure') result = harness.configure(input.agentId, input);
     else if (url.pathname === '/api/harness/decide') result = await harness.decide(input.agentId);
